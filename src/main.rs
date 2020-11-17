@@ -44,7 +44,7 @@ fn check_apps_and_kill(
 
     for app in apps {
         if let Some(process) = pname_pid.iter().find(|&x| x.1 == app.1.command) {
-            if kill_or_not(&app.1) {
+            if app.1.enabled && kill_or_not(&app.1) {
                 println!("killing {}", app.0);
                 std::process::Command::new("kill")
                     .args(&["-9", &process.0.to_string()])
