@@ -2,12 +2,12 @@
 
 ## Install
 ### Cargo
-```
-cargo install chapchap
+```sh
+$ cargo install chapchap
 ```
 
 ### Build from source
-```
+```sh
 $ cargo build --release
 $ sudo cp target/release/chapchap /usr/local/bin/
 ```
@@ -20,10 +20,10 @@ the config file is `config.toml` that must be present next to binary
 file while running.
 
 The format of each `App` section in config file is like following:
-```
+```toml
 [AppName]
 enabled = true
-slices = [ [hh:mm:ss, hh:mm:ss] ] # you can write multiple time slice
+slices = [ [13:10:00, 12:00:00] ] # you can write multiple time slice
 black_list = false # time slices are black list or white list?
 command = "mpv" # the command that application is running from
 ```
