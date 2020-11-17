@@ -30,7 +30,7 @@ command = "mpv" # the command that application is running from
 Note: `slices` filed consist of an array of time slices like [start,
 end].
 
-There is a `config.tonl` file in repository for example.
+There is a `config.toml` file in repository for example.
 
 ## License
 Apache v2 or MIT by your choice
