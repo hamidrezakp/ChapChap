@@ -8,8 +8,7 @@ $ cargo install chapchap
 
 ### Build from source
 ```sh
-$ cargo build --release
-$ sudo cp target/release/chapchap /usr/local/bin/
+$ cargo install --path .
 ```
 
 ### Pre-Build Binary
