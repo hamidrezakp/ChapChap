@@ -17,9 +17,21 @@ type Apps = HashMap<String, App>;
 
 fn main() {
     let mut settings = config::Config::default();
-    settings
-        .merge(config::File::new("config.toml", config::FileFormat::Toml))
-        .expect("config file not found, (config.toml)");
+    match std::env::var("HOME") {
+        Ok(home) => {
+            settings
+                .merge(config::File::new(
+                    &format!("{}/.config/chapcahp/config.toml", home),
+                    config::FileFormat::Toml,
+                ))
+                .unwrap();
+        }
+        Err(_) => {
+            settings
+                .merge(config::File::new("config.toml", config::FileFormat::Toml))
+                .unwrap();
+        }
+    }
 
     let apps = settings.try_into::<Apps>().unwrap();
     let mut process_list = ProcessCollector::new().unwrap();

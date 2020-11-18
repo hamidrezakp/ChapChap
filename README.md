@@ -15,8 +15,9 @@ $ cargo install --path .
 **Soon**
 
 ## Config
-the config file is `config.toml` that must be present next to binary
-file while running.
+The config file location is `~/.config/chapchap/config.toml`.
+If there is not `HOME` environment variable, it search for config file
+in current working directory.
 
 The format of each `App` section in config file is like following:
 ```toml
