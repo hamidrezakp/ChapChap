@@ -1,6 +1,6 @@
 [package]
 name = "chapchap"
-version = "0.1.2"
+version = "0.2.0"
 authors = ["Hamid R. K. Pishghadam <hamidrkp@riseup.net>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -10,7 +10,7 @@ repository = "https://github.com/hamidrezakp/ChapChap/"
 [dependencies]
 psutil = "3.2"
 config = "0.10"
-chrono = "0.4"
+chrono = {version = "0.4", features = ["serde"]}
 serde = {version = "1.0", features = ["derive"]}
 
 

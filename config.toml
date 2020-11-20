@@ -1,11 +1,13 @@
-[telegram]
+[[apps]]
+name = "Telegram"
 enabled = true
-slices = [ [09:00:00, 10:00:00], [15:00:00, 16:00:00] ]
-black_list = true
+slices = [ [18:00:00, 19:00:00] ]
+black_list = false
 command = "telegram-deskto"
 
-[mpv]
+[[apps]]
+name = "MPV"
 enabled = true
-slices = [ [18:00:00, 18:07:00], [18:08:00, 18:09:00] ]
+slices = [ [20:00:00, 23:59:00] ]
 black_list = false
 command = "mpv"
