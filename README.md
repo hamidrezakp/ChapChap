@@ -12,7 +12,7 @@ $ cargo install --path .
 ```
 
 ### Pre-Build Binary
-**Soon**
+`x86_64` release is available.
 
 ## Config
 The app first search config in `$XDG_CONFIG_HOME/chapchap/config.toml`.
@@ -22,7 +22,7 @@ in current working directory.
 The format of each `App` in config file is like following:
 ```toml
 [[apps]]
-name = APPNAME
+name = "APPNAME"
 enabled = true
 slices = [ [13:10:00, 12:00:00], [19:00:10, 23:59:00] ] # you can write multiple time slice
 black_list = false # time slices are black list or white list?
