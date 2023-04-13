@@ -1,0 +1,2 @@
+[workspace]
+members = ["chapchap", "chapchap-common", "xtask", "chapchap-ui"]

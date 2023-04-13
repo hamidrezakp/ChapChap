@@ -1,0 +1,20 @@
+[package]
+name = "chapchap"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+chapchap-common = { path = "../chapchap-common", features = ["user"] }
+
+aya = { git = "https://github.com/aya-rs/aya", branch = "main", features=["async_tokio"] }
+aya-log = { git = "https://github.com/aya-rs/aya", branch = "main" }
+clap = { version = "4.1", features = ["derive"] }
+anyhow = "1"
+env_logger = "0.10"
+log = "0.4"
+tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net", "signal"] }
+
+[[bin]]
+name = "chapchap"
+path = "src/main.rs"
