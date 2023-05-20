@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 aya-bpf = { git = "https://github.com/aya-rs/aya", branch = "main" }
 aya-log-ebpf = { git = "https://github.com/aya-rs/aya", branch = "main" }
-chapchap-common = { path = "../chapchap-common" }
 network-types = "0.0.4"
 memoffset = "0.8.0"
 

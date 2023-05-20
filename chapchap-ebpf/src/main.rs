@@ -8,10 +8,10 @@
 mod vmlinux;
 
 mod network_monitor;
-mod process_monitor;
+mod program_monitor;
 
 pub use network_monitor::network_monitor;
-pub use process_monitor::process_monitor;
+pub use program_monitor::program_monitor;
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

@@ -5,7 +5,10 @@ build = "build.rs"
 edition = "2021"
 
 [dependencies]
-slint = "1.0.0"
+slint = "1.0"
+chapchap-common = { path = "../chapchap-common" }
+anyhow = "1.0"
+zbus = "3.13"
 
 [build-dependencies]
-slint-build = "1.0.0"
+slint-build = "1.0"

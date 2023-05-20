@@ -5,16 +5,24 @@ edition = "2021"
 publish = false
 
 [dependencies]
-chapchap-common = { path = "../chapchap-common", features = ["user"] }
+chapchap-common = { path = "../chapchap-common" }
 
 aya = { git = "https://github.com/aya-rs/aya", branch = "main", features=["async_tokio"] }
 aya-log = { git = "https://github.com/aya-rs/aya", branch = "main" }
+
 clap = { version = "4.1", features = ["derive"] }
 anyhow = "1"
+
 env_logger = "0.10"
 log = "0.4"
-tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net", "signal"] }
 
-[[bin]]
-name = "chapchap"
-path = "src/main.rs"
+async-trait = "0.1"
+tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net", "signal", "sync"] }
+chrono = { version = "0.4", features = ["serde", "std", "clock"], default-features = false }
+
+serde = { version = "1", features = ["derive"] }
+zbus = "3.13"
+
+mailbox_processor = { path = "../../mailbox_processor" }
+thiserror = "1.0.40"
+dyn-clonable = "0.9"

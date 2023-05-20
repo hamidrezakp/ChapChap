@@ -1,5 +1,9 @@
+mod ipc_manager;
+
 slint::include_modules!();
 
-fn main() {
-    Example::new().unwrap().run().unwrap();
+fn main() -> anyhow::Result<()> {
+    //Example::new().unwrap().run().unwrap();
+
+    Ok(())
 }

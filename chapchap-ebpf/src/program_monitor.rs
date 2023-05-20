@@ -2,27 +2,18 @@ use crate::vmlinux;
 
 use aya_bpf::{
     macros::{lsm, map},
-    maps::{HashMap, PerCpuArray},
+    maps::HashMap,
     programs::LsmContext,
 };
 use aya_log_ebpf::debug;
-use chapchap_common::process_monitor::{FILES_BLACKLIST_LEN, MAX_FILENAME};
 
 pub(super) type LSMAction = i32;
 
-#[repr(C)]
-pub struct Buf {
-    pub buf: [u8; MAX_FILENAME],
-}
-
 #[map]
-pub static mut BUF: PerCpuArray<Buf> = PerCpuArray::with_max_entries(1, 0);
-
-#[map]
-pub static FILES_BLACKLIST: HashMap<u64, u8> = HashMap::with_max_entries(FILES_BLACKLIST_LEN, 0); //TODO: make len configurable
+pub static FILES_BLACKLIST: HashMap<u64, u8> = HashMap::with_max_entries(1024, 0); //TODO: make len configurable
 
 #[lsm(name = "process_monitor")]
-pub fn process_monitor(ctx: LsmContext) -> LSMAction {
+pub fn program_monitor(ctx: LsmContext) -> LSMAction {
     match unsafe { try_process_monitor(ctx) } {
         Ok(ret) => ret,
         Err(ret) => ret,
