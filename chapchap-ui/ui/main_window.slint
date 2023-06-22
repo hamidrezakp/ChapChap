@@ -1,0 +1,67 @@
+import { Button, LineEdit, ListView, HorizontalBox, VerticalBox, StandardTableView} from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "Chapchap";
+
+    min-height: 600px;
+    min-width: 800px;
+    preferred-height: 600px;
+    preferred-width: 800px;
+
+    callback open-add-rule-dialog() -> string;
+
+    in-out property <[TableColumn]> rule-table-columns;
+    in-out property <[[StandardListViewItem]]> rule-table-rows;
+
+    VerticalBox {
+        HorizontalBox {
+            Text {
+                horizontal-stretch: 0;
+                vertical-alignment: center;
+                text: "Program Path:";
+            }
+
+            add-rule-path := LineEdit {  
+                placeholder-text: "Path to program file: e.x. /usr/bin/mpv";
+                edited => {
+                    add-rule-add-btn.enabled = self.text != "";
+                }
+            }
+            
+            Button {
+                horizontal-stretch: 0;
+                text: "📂";
+                clicked => { 
+                    add-rule-path.text = root.open-add-rule-dialog();
+                    add-rule-add-btn.enabled = add-rule-path.text != "";
+                }
+            }
+
+            add-rule-add-btn := Button {  
+                horizontal-stretch: 0;
+                enabled: false;
+                text: "Add";
+            }
+        }
+
+        HorizontalBox {
+            alignment: start;
+            Button {  
+                horizontal-stretch: 0;
+                text: "Disable";
+                enabled: false;
+            }
+
+            Button {  
+                horizontal-stretch: 0;
+                text: "Delete";
+                enabled: false;
+            }
+        }
+
+        rule-table := StandardTableView { 
+            columns: rule-table-columns;
+            rows: rule-table-rows;
+        }
+    }
+}

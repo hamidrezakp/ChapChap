@@ -17,11 +17,12 @@ env_logger = "0.10"
 log = "0.4"
 
 async-trait = "0.1"
-tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net", "signal", "sync"] }
+tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "signal", "sync", "tracing"] }
+console-subscriber = "0.1.9"
 chrono = { version = "0.4", features = ["serde", "std", "clock"], default-features = false }
 
 serde = { version = "1", features = ["derive"] }
-zbus = "3.13"
+zbus = { version = "3.13", default-features = false, features = ["tokio"]} 
 
 mailbox_processor = { path = "../../mailbox_processor" }
 thiserror = "1.0.40"

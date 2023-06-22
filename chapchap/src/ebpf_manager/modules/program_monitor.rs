@@ -1,18 +1,25 @@
+use std::sync::Arc;
+
 use aya::{
     maps::{HashMap, MapData},
     programs::Lsm,
     Bpf, Btf,
 };
-use chapchap_common::types::program_monitor::INodeNumber;
+use chapchap_common::rule_manager::program_monitor::INodeNumber;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
-pub struct ProgramMonitor;
+pub struct ProgramMonitor {
+    bpf: Arc<Mutex<Bpf>>,
+    files_blacklist: HashMap<MapData, INodeNumber, u8>,
+}
 
 impl ProgramMonitor {
-    pub fn load(&self, bpf: &mut Bpf) -> Result<()> {
+    pub async fn load(bpf: Arc<Mutex<Bpf>>) -> Result<Self> {
+        let mut bpf_handle = bpf.lock().await;
         let btf = Btf::from_sys_fs().map_err(|e| Error::Btf(e.to_string()))?;
 
-        let program = self.program(bpf)?;
+        let program = Self::program(&mut bpf_handle)?;
 
         program
             .load("bprm_check_security", &btf)
@@ -23,41 +30,46 @@ impl ProgramMonitor {
             .map_err(|e| Error::Program(e.to_string()))?;
         log::info!("program monitor attached");
 
-        Ok(())
+        let files_blacklist = HashMap::try_from(
+            bpf_handle
+                .take_map("FILES_BLACKLIST")
+                .ok_or_else(|| Error::MapNotFound("FILES_BLACKLIST".to_string()))?,
+        )
+        .map_err(|e| Error::Map(e.to_string()))?;
+
+        drop(bpf_handle);
+
+        Ok(Self {
+            files_blacklist,
+            bpf,
+        })
     }
 
-    pub fn unload(&self, bpf: &mut Bpf) -> Result<()> {
-        self.program(bpf)?
+    pub async fn unload(self) -> Result<()> {
+        let mut bpf = self.bpf.lock().await;
+        Self::program(&mut bpf)?
             .unload()
             .map_err(|e| Error::Program(e.to_string()))
     }
 
-    pub fn block_program(&self, bpf: &mut Bpf, inode: INodeNumber) -> Result<()> {
-        self.blacklist(bpf)?
+    pub async fn block_program(&mut self, inode: INodeNumber) -> Result<()> {
+        self.files_blacklist
             .insert(inode, 0, 0)
             .map_err(|e| Error::Map(e.to_string()))
     }
 
-    pub fn allow_program(&self, bpf: &mut Bpf, inode: INodeNumber) -> Result<()> {
-        self.blacklist(bpf)?
+    pub async fn allow_program(&mut self, inode: INodeNumber) -> Result<()> {
+        self.files_blacklist
             .remove(&inode)
             .map_err(|e| Error::Map(e.to_string()))
     }
 
-    fn program<'a>(&self, bpf: &'a mut Bpf) -> Result<&'a mut Lsm> {
+    fn program<'a>(bpf: &'a mut Bpf) -> Result<&'a mut Lsm> {
         Ok(bpf
-            .program_mut("process_monitor") //TODO: change to program_monitor
+            .program_mut("program_monitor")
             .ok_or_else(|| Error::ProgramNotFound)?
             .try_into()
             .unwrap()) //TODO
-    }
-
-    fn blacklist(&self, bpf: &mut Bpf) -> Result<HashMap<MapData, u64, u8>> {
-        HashMap::try_from(
-            bpf.take_map("FILES_BLACKLIST")
-                .ok_or_else(|| Error::MapNotFound("FILES_BLACKLIST".to_string()))?,
-        )
-        .map_err(|e| Error::Map(e.to_string()))
     }
 }
 

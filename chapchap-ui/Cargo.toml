@@ -6,9 +6,25 @@ edition = "2021"
 
 [dependencies]
 slint = "1.0"
-chapchap-common = { path = "../chapchap-common" }
 anyhow = "1.0"
-zbus = "3.13"
+zbus = { version = "3.13", default-features = false, features = ["tokio"] }
+async-trait = "0.1.68"
+dyn-clonable = "0.9.0"
+serde = { version = "1.0.163", features = ["derive"] }
+thiserror = "1.0.40"
+chapchap-common = { path = "../chapchap-common" }
+tokio = { version = "1.28.1", features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "signal",
+] }
+log = "0.4.17"
+rfd = { version = "0.11.4", default-features = false, features = [
+    "xdg-portal",
+] }
+futures = "0.3.28"
 
 [build-dependencies]
-slint-build = "1.0"
+slint-build = "1.0.2"

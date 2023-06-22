@@ -1,48 +1,61 @@
+use anyhow::Context;
 use async_trait::async_trait;
-use chapchap_common::{
-    dbus_types,
-    types::{Rule, RuleID},
-};
+use chapchap_common::rule_manager::{dbus_types, Error as RuleError, Rule, RuleID, RuleWithID};
 use dyn_clonable::clonable;
-use mailbox_processor::{callback::CallbackMailboxProcessor, notification_channel, ReplyChannel};
-use zbus::{dbus_interface, Connection, ConnectionBuilder};
+use log::trace;
+use mailbox_processor::{callback::CallbackMailboxProcessor, ReplyChannel};
+use tokio::sync::OnceCell;
+use zbus::{dbus_interface, Connection, ConnectionBuilder, SignalContext};
 
 use self::types::Error;
 use crate::rule_manager::RuleManager;
 
+pub mod client;
 mod types;
-
-pub const SERVICE_BASE_ID: &str = "ir.hrkp.Chapchap";
 
 #[async_trait]
 #[clonable]
 pub trait IPCManager: Clone + Send + Sync {
+    async fn rules_changed(&self) -> Result<(), Error>;
+
     async fn stop(&self) -> Result<(), Error>;
 }
 
 struct State {
     rule_manager: Box<dyn RuleManager>,
-
-    notification_tx: notification_channel::Sender<Notification>,
 }
 
-impl State {
-    pub fn notify(&self, notification: Notification) {
-        self.notification_tx.send(notification)
-    }
-}
-
+#[derive(Debug)]
 enum Message {
     AddRule(Rule, ReplyChannel<Result<RuleID, Error>>),
+    DisableRule(RuleID, ReplyChannel<Result<(), Error>>),
+    EnableRule(RuleID, ReplyChannel<Result<(), Error>>),
+
+    GetRules(ReplyChannel<Result<Vec<RuleWithID>, Error>>),
 }
 
 #[derive(Clone)]
 pub struct IPCManagerImpl {
     mailbox: CallbackMailboxProcessor<Message>,
+
+    dbus_connection: Option<Connection>,
+    signal_context: OnceCell<SignalContext<'static>>,
 }
 
 #[async_trait]
 impl IPCManager for IPCManagerImpl {
+    async fn rules_changed(&self) -> Result<(), Error> {
+        if let Some(signal_context) = self.signal_context.get() {
+            self.rules_changed(&signal_context)
+                .await
+                .map_err(|e| Error::Internal(format!("dbus signal error: {e:?}")))
+        } else {
+            Err(Error::Internal(
+                "dbus connection/signal_context not ready".into(),
+            ))
+        }
+    }
+
     async fn stop(&self) -> Result<(), Error> {
         self.mailbox.clone().stop().await;
         Ok(())
@@ -50,52 +63,131 @@ impl IPCManager for IPCManagerImpl {
 }
 
 async fn mailbox_step(_mb: CallbackMailboxProcessor<Message>, msg: Message, state: State) -> State {
+    trace!("Got message: {msg:?}");
+
     match msg {
         Message::AddRule(rule, reply) => {
-            let rule: dbus_types::Rule = rule.into();
+            let rule: Rule = rule.into();
+
+            let result = state
+                .rule_manager
+                .add_rule(rule)
+                .await
+                .map_err(|e| Error::RuleManager(e));
+
+            reply.reply(result)
+        }
+        Message::DisableRule(rule_id, reply) => {
+            let result = state
+                .rule_manager
+                .disable_rule(rule_id)
+                .await
+                .map_err(|e| Error::RuleManager(e));
+
+            reply.reply(result)
+        }
+        Message::EnableRule(rule_id, reply) => {
+            let result = state
+                .rule_manager
+                .enable_rule(rule_id)
+                .await
+                .map_err(|e| Error::RuleManager(e));
+
+            reply.reply(result)
+        }
+        Message::GetRules(reply) => {
+            let result = state
+                .rule_manager
+                .get_rules()
+                .await
+                .map_err(|e| Error::RuleManager(e));
+            reply.reply(result)
         }
     }
     state
 }
 
-pub enum Notification {}
-
-#[dbus_interface(name = "ir.hrkp.Chapchap1")]
+#[dbus_interface(name = "ir.hrkp.Chapchap1.RuleManager")]
 impl IPCManagerImpl {
     /// Add new rule
-    async fn add_rule(&self, rule: dbus_types::Rule) -> Result<RuleID, dbus_types::Error> {
+    async fn add_rule(&self, rule: dbus_types::Rule) -> Result<RuleID, RuleError> {
         let rule: Rule = rule.try_into()?;
-        self.mailbox
+
+        trace!("Add rule: {rule:?}");
+
+        let result = self
+            .mailbox
             .post_and_reply(|r| Message::AddRule(rule, r))
             .await
-            .map_err(|_| dbus_types::Error::Internal)?
-            .map_err(Into::into)
+            .map_err(|e| RuleError::InternalServer(e.to_string()))?
+            .map_err(|e| RuleError::RuleManager(e.to_string()));
+
+        result
+    }
+
+    /// Disable rule
+    async fn disable_rule(&self, rule_id: dbus_types::RuleID) -> Result<(), RuleError> {
+        trace!("Disable rule: {rule_id}");
+
+        self.mailbox
+            .post_and_reply(|r| Message::DisableRule(rule_id, r))
+            .await
+            .map_err(|e| RuleError::InternalServer(e.to_string()))?
+            .map_err(|e| RuleError::RuleManager(e.to_string()))
+    }
+
+    /// Enable rule
+    async fn enable_rule(&self, rule_id: dbus_types::RuleID) -> Result<(), RuleError> {
+        trace!("Enable rule: {rule_id}");
+
+        self.mailbox
+            .post_and_reply(|r| Message::EnableRule(rule_id, r))
+            .await
+            .map_err(|e| RuleError::InternalServer(e.to_string()))?
+            .map_err(|e| RuleError::RuleManager(e.to_string()))
+    }
+
+    #[dbus_interface(property)]
+    async fn rules(&self) -> zbus::fdo::Result<Vec<dbus_types::RuleWithID>> {
+        trace!("Getting all the rule");
+
+        let rules = self
+            .mailbox
+            .post_and_reply(|r| Message::GetRules(r))
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+            .map(|v| v.into_iter().map(Into::into).collect::<Vec<_>>())?;
+
+        trace!("Rules: {rules:?}");
+        Ok(rules)
     }
 }
 
-pub async fn start(
-    rule_manager: Box<dyn RuleManager>,
-) -> anyhow::Result<(
-    Box<dyn IPCManager>,
-    notification_channel::Receiver<Notification>,
-    Connection,
-)> {
-    let (notification_tx, notification_rx) = notification_channel::channel();
+pub async fn start(rule_manager: Box<dyn RuleManager>) -> anyhow::Result<Box<dyn IPCManager>> {
+    let state = State { rule_manager };
 
-    let state = State {
-        notification_tx,
-        rule_manager,
-    };
-
-    let ipc = IPCManagerImpl {
+    let mut ipc = IPCManagerImpl {
         mailbox: CallbackMailboxProcessor::start(mailbox_step, state, 1000),
+        dbus_connection: None,
+        signal_context: OnceCell::new(),
     };
 
-    let conn = ConnectionBuilder::session()?
-        .name(SERVICE_BASE_ID)?
-        .serve_at("/ir/hrkp/Chapchap", ipc.clone())?
+    let serving_path = "/ir/hrkp/Chapchap1".to_string();
+
+    let dbus_connection = ConnectionBuilder::session()?
+        .name("ir.hrkp.Chapchap")?
+        .serve_at(serving_path.clone(), ipc.clone())?
         .build()
         .await?;
 
-    Ok((Box::new(ipc), notification_rx, conn))
+    ipc.dbus_connection = Some(dbus_connection.clone());
+
+    let signal_context =
+        SignalContext::new(&dbus_connection, serving_path).context("creating signal context")?;
+    ipc.signal_context
+        .set(signal_context)
+        .context("setting signal context")?;
+
+    Ok(Box::new(ipc))
 }

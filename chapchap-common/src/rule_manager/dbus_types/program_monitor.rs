@@ -4,15 +4,18 @@ use serde::{Deserialize, Serialize};
 use zbus::zvariant::{Array, OwnedValue, Type, Value};
 
 use super::Error;
+use crate::rule_manager::program_monitor as program_monitor_types;
 
-#[derive(Debug, Serialize, Deserialize, Type)]
+mod value_convert;
+
+#[derive(Debug, Serialize, Deserialize, Type, OwnedValue)]
 pub struct Rule {
     pub filter: Filter,
     pub action: Action,
 }
 
-impl From<crate::types::program_monitor::Rule> for Rule {
-    fn from(value: crate::types::program_monitor::Rule) -> Self {
+impl From<program_monitor_types::Rule> for Rule {
+    fn from(value: program_monitor_types::Rule) -> Self {
         Self {
             filter: value.filter.into(),
             action: value.action.into(),
@@ -20,7 +23,7 @@ impl From<crate::types::program_monitor::Rule> for Rule {
     }
 }
 
-impl TryFrom<Rule> for crate::types::program_monitor::Rule {
+impl TryFrom<Rule> for program_monitor_types::Rule {
     type Error = Error;
 
     fn try_from(value: Rule) -> Result<Self, Self::Error> {
@@ -37,8 +40,8 @@ pub struct TimeSlice {
     end: NaiveTime,
 }
 
-impl From<crate::types::program_monitor::TimeSlice> for TimeSlice {
-    fn from(value: crate::types::program_monitor::TimeSlice) -> Self {
+impl From<program_monitor_types::TimeSlice> for TimeSlice {
+    fn from(value: program_monitor_types::TimeSlice) -> Self {
         Self {
             start: value.start.into(),
             end: value.end.into(),
@@ -46,7 +49,7 @@ impl From<crate::types::program_monitor::TimeSlice> for TimeSlice {
     }
 }
 
-impl TryFrom<TimeSlice> for crate::types::program_monitor::TimeSlice {
+impl TryFrom<TimeSlice> for program_monitor_types::TimeSlice {
     type Error = Error;
 
     fn try_from(value: TimeSlice) -> Result<Self, Self::Error> {
@@ -65,11 +68,11 @@ pub enum Filter {
     TimeLimited(OwnedValue), // Duration
 }
 
-impl From<crate::types::program_monitor::Filter> for Filter {
-    fn from(value: crate::types::program_monitor::Filter) -> Self {
+impl From<program_monitor_types::Filter> for Filter {
+    fn from(value: program_monitor_types::Filter) -> Self {
         match value {
-            crate::types::program_monitor::Filter::Basic => Self::Basic(OwnedValue::from(0u8)),
-            crate::types::program_monitor::Filter::Scheduled(items) => {
+            program_monitor_types::Filter::Basic => Self::Basic(OwnedValue::from(0u8)),
+            program_monitor_types::Filter::Scheduled(items) => {
                 let items: Array = items
                     .into_iter()
                     .map(Into::<TimeSlice>::into)
@@ -77,7 +80,7 @@ impl From<crate::types::program_monitor::Filter> for Filter {
                     .into();
                 Self::Scheduled(items.into())
             }
-            crate::types::program_monitor::Filter::TimeLimited(d) => {
+            program_monitor_types::Filter::TimeLimited(d) => {
                 let secs = d.as_secs();
                 let nanos = d.subsec_nanos() as u64;
                 let value: Array = vec![secs, nanos].into();
@@ -87,20 +90,20 @@ impl From<crate::types::program_monitor::Filter> for Filter {
     }
 }
 
-impl TryFrom<Filter> for crate::types::program_monitor::Filter {
+impl TryFrom<Filter> for program_monitor_types::Filter {
     type Error = Error;
 
     fn try_from(value: Filter) -> Result<Self, Self::Error> {
         match value {
-            Filter::Basic(_) => Ok(crate::types::program_monitor::Filter::Basic),
+            Filter::Basic(_) => Ok(program_monitor_types::Filter::Basic),
             Filter::Scheduled(i) => {
-                let items = Array::try_from(i)
+                let items = Array::try_from(i.to_owned())
                     .and_then(TryInto::<Vec<TimeSlice>>::try_into)
                     .map_err(|e| Error::InvalidZVariant(format!("Expected TimeSlice: {e}")))?
                     .into_iter()
-                    .map(TryInto::<crate::types::program_monitor::TimeSlice>::try_into)
+                    .map(TryInto::<program_monitor_types::TimeSlice>::try_into)
                     .collect::<Result<_, _>>()?;
-                Ok(crate::types::program_monitor::Filter::Scheduled(items))
+                Ok(program_monitor_types::Filter::Scheduled(items))
             }
             Filter::TimeLimited(i) => {
                 let array: Array = i
@@ -126,7 +129,7 @@ impl TryFrom<Filter> for crate::types::program_monitor::Filter {
                 let nanos = value[1] as u32;
 
                 let dur = std::time::Duration::new(secs, nanos);
-                Ok(crate::types::program_monitor::Filter::TimeLimited(dur))
+                Ok(program_monitor_types::Filter::TimeLimited(dur))
             }
         }
     }
@@ -137,21 +140,21 @@ pub enum Action {
     BlockProgramExecution(u64),
 }
 
-impl From<crate::types::program_monitor::Action> for Action {
-    fn from(value: crate::types::program_monitor::Action) -> Self {
+impl From<program_monitor_types::Action> for Action {
+    fn from(value: program_monitor_types::Action) -> Self {
         match value {
-            crate::types::program_monitor::Action::BlockProgramExecution(i) => {
+            program_monitor_types::Action::BlockProgramExecution(i) => {
                 Self::BlockProgramExecution(i)
             }
         }
     }
 }
 
-impl From<Action> for crate::types::program_monitor::Action {
+impl From<Action> for program_monitor_types::Action {
     fn from(value: Action) -> Self {
         match value {
             Action::BlockProgramExecution(i) => {
-                crate::types::program_monitor::Action::BlockProgramExecution(i)
+                program_monitor_types::Action::BlockProgramExecution(i)
             }
         }
     }

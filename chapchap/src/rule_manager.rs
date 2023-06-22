@@ -1,8 +1,9 @@
 use std::collections::{hash_map, HashMap};
 
 use async_trait::async_trait;
-use chapchap_common::types::{Rule, RuleID};
+use chapchap_common::rule_manager::{Rule, RuleID, RuleWithID};
 use dyn_clonable::clonable;
+use log::trace;
 use mailbox_processor::{callback::CallbackMailboxProcessor, notification_channel, ReplyChannel};
 
 pub use self::types::Error;
@@ -19,6 +20,8 @@ pub trait RuleManager: Clone + Send + Sync {
 
     async fn disable_rule(&self, rule_id: RuleID) -> Result<()>;
     async fn enable_rule(&self, rule_id: RuleID) -> Result<()>;
+
+    async fn get_rules(&self) -> Result<Vec<RuleWithID>>;
 
     async fn stop(&self) -> Result<()>;
 }
@@ -38,6 +41,7 @@ impl State {
     }
 
     pub fn notify(&self, notification: Notification) {
+        trace!("Sending notification: {notification:?}");
         self.notification_tx.send(notification)
     }
 }
@@ -48,6 +52,8 @@ enum Message {
     UpdateRule(RuleID, Rule, ReplyChannel<Result<()>>),
     EnableRule(RuleID, ReplyChannel<Result<()>>),
     DisableRule(RuleID, ReplyChannel<Result<()>>),
+
+    GetRules(ReplyChannel<Vec<RuleWithID>>),
 }
 
 #[derive(Clone)]
@@ -89,6 +95,13 @@ impl RuleManager for RuleManagerImpl {
             .map_err(|e| Error::Internal(format!("MailboxError: {e}")))?
     }
 
+    async fn get_rules(&self) -> Result<Vec<RuleWithID>> {
+        self.mailbox
+            .post_and_reply(|r| Message::GetRules(r))
+            .await
+            .map_err(|e| Error::Internal(format!("MailboxError: {e}")))
+    }
+
     async fn stop(&self) -> Result<()> {
         self.mailbox.clone().stop().await;
         Ok(())
@@ -103,10 +116,14 @@ async fn mailbox_step(
     match msg {
         Message::AddRule(rule, reply) => {
             let result = if let Some((rule_id, _)) = state.rules.iter().find(|(_, v)| **v == rule) {
+                trace!("Rule already exist");
                 Err(Error::RuleAlreadyExist(*rule_id))
             } else {
                 let rule_id = state.next_rule_id();
                 state.rules.insert(rule_id, rule.clone());
+
+                trace!("Rule inserted: {rule_id}, {rule:?}");
+
                 state.notify(Notification::RuleAdded { rule_id, rule });
                 Ok(rule_id)
             };
@@ -115,6 +132,7 @@ async fn mailbox_step(
 
         Message::RemoveRule(rule_id) => {
             if let Some(rule) = state.rules.remove(&rule_id) {
+                trace!("Rule removed: {rule_id}, {rule:?}");
                 state.notify(Notification::RuleRemoved { rule_id, rule });
             }
         }
@@ -123,6 +141,9 @@ async fn mailbox_step(
             let result = match state.rules.entry(rule_id) {
                 hash_map::Entry::Occupied(mut occ) => {
                     let old_rule = occ.insert(new_rule.clone());
+
+                    trace!("Rule updated: {old_rule:?} to {new_rule:?}");
+
                     state.notify(Notification::RuleUpdated {
                         rule_id,
                         old_rule,
@@ -142,6 +163,8 @@ async fn mailbox_step(
                     occ.get_mut().is_active = true;
                     let new_rule = occ.get().clone();
 
+                    trace!("Rule enabled: {rule_id}");
+
                     state.notify(Notification::RuleUpdated {
                         rule_id,
                         old_rule,
@@ -155,6 +178,7 @@ async fn mailbox_step(
             };
             reply.reply(result);
         }
+
         Message::DisableRule(rule_id, reply) => {
             let result = match state.rules.entry(rule_id) {
                 hash_map::Entry::Occupied(mut occ) => {
@@ -162,6 +186,8 @@ async fn mailbox_step(
                     occ.get_mut().is_active = false;
                     let new_rule = occ.get().clone();
 
+                    trace!("Rule disabled: {rule_id}");
+
                     state.notify(Notification::RuleUpdated {
                         rule_id,
                         old_rule,
@@ -175,10 +201,21 @@ async fn mailbox_step(
             };
             reply.reply(result);
         }
+
+        Message::GetRules(reply) => {
+            let rules = state
+                .rules
+                .clone()
+                .into_iter()
+                .map(|(id, rule)| RuleWithID { id, rule })
+                .collect::<Vec<_>>();
+            reply.reply(rules);
+        }
     }
     state
 }
 
+#[derive(Debug)]
 pub enum Notification {
     RuleAdded {
         rule_id: RuleID,

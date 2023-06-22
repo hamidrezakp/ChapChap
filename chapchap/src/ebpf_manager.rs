@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use aya::{include_bytes_aligned, Bpf};
 use aya_log::BpfLogger;
-use chapchap_common::types::program_monitor::INodeNumber;
+use chapchap_common::rule_manager::program_monitor::INodeNumber;
 use dyn_clonable::clonable;
-use log::warn;
+use log::{trace, warn};
 use mailbox_processor::{callback::CallbackMailboxProcessor, ReplyChannel};
+use tokio::sync::Mutex;
 
 use self::modules::program_monitor::ProgramMonitor;
 use self::types::{Error, Result};
@@ -15,25 +18,25 @@ mod types;
 #[async_trait]
 #[clonable]
 pub trait EBPFManager: Clone + Send + Sync {
-    async fn process_monitor_load(&self) -> Result<()>;
-    async fn process_monitor_unload(&self) -> Result<()>;
-    async fn process_monitor_allow_program(&self, inode: INodeNumber) -> Result<()>;
-    async fn process_monitor_block_program(&self, inode: INodeNumber) -> Result<()>;
+    async fn program_monitor_load(&self) -> Result<()>;
+    async fn program_monitor_unload(&self) -> Result<()>;
+    async fn program_monitor_allow_program(&self, inode: INodeNumber) -> Result<()>;
+    async fn program_monitor_block_program(&self, inode: INodeNumber) -> Result<()>;
 
     async fn stop(&self) -> Result<()>;
 }
 
 struct State {
-    bpf: Bpf,
+    bpf: Arc<Mutex<Bpf>>,
 
-    process_monitor: ProgramMonitor,
+    program_monitor: Option<ProgramMonitor>,
 }
 
 enum Message {
-    ProcessMonitorLoad(ReplyChannel<Result<()>>),
-    ProcessMonitorUnload(ReplyChannel<Result<()>>),
-    ProcessMonitorAllowProgram(INodeNumber, ReplyChannel<Result<()>>),
-    ProcessMonitorBlockProgram(INodeNumber, ReplyChannel<Result<()>>),
+    ProgramMonitorLoad(ReplyChannel<Result<()>>),
+    ProgramMonitorUnload(ReplyChannel<Result<()>>),
+    ProgramMonitorAllowProgram(INodeNumber, ReplyChannel<Result<()>>),
+    ProgramMonitorBlockProgram(INodeNumber, ReplyChannel<Result<()>>),
 }
 
 #[derive(Clone)]
@@ -43,37 +46,45 @@ pub struct EBPFManagerImpl {
 
 #[async_trait]
 impl EBPFManager for EBPFManagerImpl {
-    async fn process_monitor_load(&self) -> Result<()> {
+    async fn program_monitor_load(&self) -> Result<()> {
+        trace!("[program monitor] Loading");
+
         self.mailbox
-            .post_and_reply(|r| Message::ProcessMonitorLoad(r))
+            .post_and_reply(|r| Message::ProgramMonitorLoad(r))
             .await
             .map_err(|e| Error::Internal(format!("MailboxError: {e}")))?
     }
 
-    async fn process_monitor_unload(&self) -> Result<()> {
+    async fn program_monitor_unload(&self) -> Result<()> {
+        trace!("[program monitor] Unloading");
+
         self.mailbox
-            .post_and_reply(|r| Message::ProcessMonitorUnload(r))
+            .post_and_reply(|r| Message::ProgramMonitorUnload(r))
             .await
             .map_err(|e| Error::Internal(format!("MailboxError: {e}")))?
     }
 
-    async fn process_monitor_allow_program(&self, inode: INodeNumber) -> Result<()> {
+    async fn program_monitor_allow_program(&self, inode: INodeNumber) -> Result<()> {
+        trace!("[program monitor] Allow: {inode}");
+
         self.mailbox
-            .post_and_reply(|r| Message::ProcessMonitorAllowProgram(inode, r))
+            .post_and_reply(|r| Message::ProgramMonitorAllowProgram(inode, r))
             .await
             .map_err(|e| Error::Internal(format!("MailboxError: {e}")))?
     }
 
-    async fn process_monitor_block_program(&self, inode: INodeNumber) -> Result<()> {
+    async fn program_monitor_block_program(&self, inode: INodeNumber) -> Result<()> {
+        trace!("[program monitor] Block: {inode}");
+
         self.mailbox
-            .post_and_reply(|r| Message::ProcessMonitorBlockProgram(inode, r))
+            .post_and_reply(|r| Message::ProgramMonitorBlockProgram(inode, r))
             .await
             .map_err(|e| Error::Internal(format!("MailboxError: {e}")))?
     }
 
     async fn stop(&self) -> Result<()> {
         self.mailbox
-            .post_and_reply(|r| Message::ProcessMonitorUnload(r))
+            .post_and_reply(|r| Message::ProgramMonitorUnload(r))
             .await
             .map_err(|e| Error::Internal(format!("MailboxError: {e}")))??;
 
@@ -88,36 +99,48 @@ async fn mailbox_step(
     mut state: State,
 ) -> State {
     match msg {
-        Message::ProcessMonitorLoad(reply) => {
-            let result = state
-                .process_monitor
-                .load(&mut state.bpf)
-                .map_err(Error::ProcessMonitor);
+        Message::ProgramMonitorLoad(reply) => {
+            let result = match state.program_monitor {
+                Some(_) => Err(Error::ModuleAlreadyLoaded("program_monitor")),
+                None => match ProgramMonitor::load(state.bpf.clone()).await {
+                    Ok(p) => {
+                        state.program_monitor = Some(p);
+                        Ok(())
+                    }
+                    Err(e) => Err(Error::ProgramMonitor(e)),
+                },
+            };
 
             reply.reply(result);
         }
-        Message::ProcessMonitorUnload(reply) => {
-            let result = state
-                .process_monitor
-                .unload(&mut state.bpf)
-                .map_err(Error::ProcessMonitor);
+        Message::ProgramMonitorUnload(reply) => {
+            let result = if state.program_monitor.is_none() {
+                Err(Error::ModuleNotLoaded("program_monitor"))
+            } else {
+                let program_monitor = state.program_monitor.take().unwrap();
+
+                match program_monitor.unload().await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(Error::ProgramMonitor(e)),
+                }
+            };
 
             reply.reply(result);
         }
 
-        Message::ProcessMonitorAllowProgram(inode, reply) => {
-            let result = state
-                .process_monitor
-                .allow_program(&mut state.bpf, inode)
-                .map_err(Error::ProcessMonitor);
+        Message::ProgramMonitorAllowProgram(inode, reply) => {
+            let result = match state.program_monitor {
+                Some(ref mut p) => p.allow_program(inode).await.map_err(Error::ProgramMonitor),
+                None => Err(Error::ModuleNotLoaded("program_monitor")),
+            };
 
             reply.reply(result);
         }
-        Message::ProcessMonitorBlockProgram(inode, reply) => {
-            let result = state
-                .process_monitor
-                .block_program(&mut state.bpf, inode)
-                .map_err(Error::ProcessMonitor);
+        Message::ProgramMonitorBlockProgram(inode, reply) => {
+            let result = match state.program_monitor {
+                Some(ref mut p) => p.block_program(inode).await.map_err(Error::ProgramMonitor),
+                None => Err(Error::ModuleNotLoaded("program_monitor")),
+            };
 
             reply.reply(result);
         }
@@ -134,8 +157,8 @@ pub fn start() -> Result<Box<dyn EBPFManager>> {
     }
 
     let state = State {
-        bpf,
-        process_monitor: ProgramMonitor,
+        bpf: Arc::new(Mutex::new(bpf)),
+        program_monitor: None,
     };
 
     Ok(Box::new(EBPFManagerImpl {

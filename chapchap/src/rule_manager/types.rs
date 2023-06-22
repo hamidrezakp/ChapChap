@@ -1,4 +1,4 @@
-use chapchap_common::types::RuleID;
+use chapchap_common::rule_manager::RuleID;
 use serde::{Deserialize, Serialize};
 
 pub type Result<T> = std::result::Result<T, Error>;

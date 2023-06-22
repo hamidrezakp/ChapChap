@@ -9,8 +9,14 @@ pub enum Error {
     #[error("Btf error: {0}")]
     Btf(String),
 
-    #[error("Process monitor module: {0}")]
-    ProcessMonitor(program_monitor::Error),
+    #[error("Program monitor module: {0}")]
+    ProgramMonitor(program_monitor::Error),
+
+    #[error("Module is not loaded: {0}")]
+    ModuleNotLoaded(&'static str),
+
+    #[error("Module already loaded: {0}")]
+    ModuleAlreadyLoaded(&'static str),
 
     #[error("Internal Error: {0}")]
     Internal(String),
