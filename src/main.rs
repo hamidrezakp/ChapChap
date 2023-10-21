@@ -1,9 +1,10 @@
 use chrono::NaiveTime;
 use config::{Config, File as ConfigFile, FileFormat};
 use psutil::process::ProcessCollector;
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::{env, process::Command, thread, time::Duration};
+use std::{env, thread, time::Duration};
 
 /// Represent an app in config file
 #[derive(Debug, Deserialize)]
@@ -13,6 +14,7 @@ struct App {
     slices: Vec<(NaiveTime, NaiveTime)>,
     black_list: bool,
     command: String,
+    args: String,
 }
 
 /// Represent an raw_time app in config file
@@ -23,6 +25,7 @@ struct RawTimeApp {
     slices: Vec<(String, String)>,
     black_list: bool,
     command: String,
+    args: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +60,7 @@ impl TempApps {
                     .collect(),
                 black_list: app.black_list,
                 command: app.command.to_owned(),
+                args: app.args.to_owned(),
             })
             .collect())
     }
@@ -102,25 +106,20 @@ fn check_apps_and_kill(
     apps: &Vec<App>,
     process_list: &BTreeMap<psutil::Pid, psutil::process::Process>,
 ) {
-    let pname_pid: Vec<_> = process_list
-        .iter()
-        .map(|x| (x.0, x.1.name().unwrap_or("".into())))
-        .collect();
-
     let now = chrono::Local::now().time();
+    for process in process_list {
+        let process = process.1;
 
-    for app in apps {
-        if let Some(process) = pname_pid.iter().find(|&p| p.1 == app.command) {
-            if app.enabled && kill_or_not(&app, &now) {
-                println!("killing {}", app.name);
-                Command::new("kill")
-                    .args(&["-9", &process.0.to_string()])
-                    .output()
-                    .expect(&format!(
-                        "failed to kill process {}, with PID {}",
-                        &(app.command),
-                        process.0,
-                    ));
+        if let Ok(Some(cmd)) = process.cmdline() {
+            let cmd = cmd.split(" ").collect::<Vec<&str>>();
+            for app in apps {
+                if app.command == cmd[0] {
+                    let pattern = Regex::new(&app.args).expect("Invalid regex in `args` field");
+                    if (app.args == "" || pattern.is_match(&cmd[1..].join(" "))) && (app.enabled && kill_or_not(&app, &now)) {
+                        println!("killing {}", app.name);
+                        process.kill().expect("Failed to kill process");
+                    }
+                }
             }
         }
     }
