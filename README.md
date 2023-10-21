@@ -1,4 +1,5 @@
-## ChapChap, Kill distracting Apps
+# ChapChap, Kill distracting Apps
+ChapChap is a simple usage control app with time slice support.
 
 ## Install
 ### Cargo

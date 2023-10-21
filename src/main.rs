@@ -1,4 +1,5 @@
 use chrono::NaiveTime;
+use clap::Parser;
 use config::{Config, File as ConfigFile, FileFormat};
 use psutil::process::ProcessCollector;
 use regex::Regex;
@@ -31,6 +32,30 @@ struct RawTimeApp {
 #[derive(Debug, Deserialize)]
 struct TempApps {
     apps: Vec<RawTimeApp>,
+}
+
+#[derive(Parser)]
+#[command(name = "Chap Chap", author = "", disable_version_flag=true, about = "simple usage control app", long_about = None, override_usage="chapchap [OPTIONS]")]
+
+struct Cli {
+    #[arg(
+        short,
+        long,
+        value_name = "FILE",
+        default_value = "./config.toml",
+        default_missing_value = "./config.toml",
+        help = "configuration file"
+    )]
+    config: String,
+    #[arg(
+        short,
+        long,
+        value_name = "NUMBER",
+        default_value = "500",
+        default_missing_value = "500",
+        help = "delay betwean checking for processes in ms"
+    )]
+    delay: u64,
 }
 
 impl TempApps {
@@ -68,6 +93,7 @@ impl TempApps {
 
 fn main() {
     let mut settings = Config::default();
+    let args = Cli::parse();
     if let Ok(config_file_path) = env::var("XDG_CONFIG_HOME") {
         settings
             .merge(ConfigFile::new(
@@ -81,8 +107,8 @@ fn main() {
     // Fallback to search config file in CWD
     } else {
         settings
-            .merge(ConfigFile::new("config.toml", FileFormat::Toml))
-            .expect("Can't open config file in current working directory");
+            .merge(ConfigFile::new(&args.config, FileFormat::Toml))
+            .expect(&format!("Can't open config file in {}", args.config));
     }
 
     let apps = settings
@@ -98,7 +124,7 @@ fn main() {
         check_apps_and_kill(&apps, &process_list.processes);
 
         // going for a short nap (500ms)
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(args.delay));
     }
 }
 
@@ -115,7 +141,9 @@ fn check_apps_and_kill(
             for app in apps {
                 if app.command == cmd[0] {
                     let pattern = Regex::new(&app.args).expect("Invalid regex in `args` field");
-                    if (app.args == "" || pattern.is_match(&cmd[1..].join(" "))) && (app.enabled && kill_or_not(&app, &now)) {
+                    if (app.args == "" || pattern.is_match(&cmd[1..].join(" ")))
+                        && (app.enabled && kill_or_not(&app, &now))
+                    {
                         println!("killing {}", app.name);
                         process.kill().expect("Failed to kill process");
                     }
