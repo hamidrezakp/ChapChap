@@ -13,7 +13,7 @@ $ cargo install --path .
 ```
 
 ### Pre-Build Binary
-`x86_64` release is available.
+`x86_64`, `x86` release is available.
 
 ## Usage
 just run chapchap, it will get process tree and checks for programs you gave there is no need for additional arguments.
