@@ -1,7 +1,7 @@
 # ChapChap, Kill distracting Apps
 ChapChap is a simple usage control app with time slice support.
 
-## Install
+## Installation
 ### Cargo
 ```sh
 $ cargo install chapchap
@@ -15,10 +15,21 @@ $ cargo install --path .
 ### Pre-Build Binary
 `x86_64` release is available.
 
+## Usage
+just run chapchap, it will get process tree and checks for programs you gave there is no need for additional arguments.
+
+for ease you can create an systemd service so it will run on startup
+```
+[Service]
+Type=simple
+Restart=always
+ExecStart=/bin/chapchap
+```
+
 ## Config
 The app first search config in `$XDG_CONFIG_HOME/chapchap/config.toml`.
 If there is not `$XDG_CONFIG_HOME` environment variable, it search for config file
-in current working directory.
+in current working directory or checks for `--config` argument.
 
 The format of each `App` in config file is like following:
 ```toml
