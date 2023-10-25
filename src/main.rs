@@ -123,7 +123,6 @@ fn main() {
         process_list.update().expect("Can't update process list");
         check_apps_and_kill(&apps, &process_list.processes);
 
-        // going for a short nap (500ms)
         thread::sleep(Duration::from_millis(args.delay));
     }
 }
@@ -140,8 +139,7 @@ fn check_apps_and_kill(
             let cmd = cmd.split(" ").collect::<Vec<&str>>();
             for app in apps {
                 if app.command == cmd[0] {
-                    let pattern = Regex::new(&app.args).expect("Invalid regex in `args` field");
-                    if (app.args == "" || pattern.is_match(&cmd[1..].join(" ")))
+                    if (app.args.is_empty() || check_args(&app.args, &cmd[1..].join(" ")))
                         && (app.enabled && kill_or_not(&app, &now))
                     {
                         println!("killing {}", app.name);
@@ -150,6 +148,15 @@ fn check_apps_and_kill(
                 }
             }
         }
+    }
+}
+fn check_args(user_args: &str, args: &str) -> bool {
+    if user_args.contains("*") {
+        Regex::new(&user_args.replace("*", ".+"))
+            .expect("Failed to parse `*` to `.+` regex")
+            .is_match(args)
+    } else {
+        false
     }
 }
 
