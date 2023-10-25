@@ -26,7 +26,7 @@ struct RawTimeApp {
     slices: Vec<(String, String)>,
     black_list: bool,
     command: String,
-    args: String,
+    args: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,7 +85,7 @@ impl TempApps {
                     .collect(),
                 black_list: app.black_list,
                 command: app.command.to_owned(),
-                args: app.args.to_owned(),
+                args: app.args.clone().unwrap_or("".to_string()),
             })
             .collect())
     }
@@ -156,7 +156,7 @@ fn check_args(user_args: &str, args: &str) -> bool {
             .expect("Failed to parse `*` to `.+` regex")
             .is_match(args)
     } else {
-        false
+        user_args == args
     }
 }
 
