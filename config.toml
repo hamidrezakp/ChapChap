@@ -12,4 +12,4 @@ enabled = true
 slices = [ [20:00:00, 23:59:00] ]
 black_list = false
 command = "mpv"
-args = ".+vid.+"
+args = "*vid*"

@@ -6,6 +6,7 @@ use regex::Regex;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::{env, thread, time::Duration};
+use once_cell::sync::OnceCell;
 
 /// Represent an app in config file
 #[derive(Debug, Deserialize)]
@@ -91,6 +92,13 @@ impl TempApps {
     }
 }
 
+macro_rules! lazy_regex {
+    ($re:expr) => {{
+        static RE: OnceCell<Regex> = OnceCell::new();
+        RE.get_or_init(|| Regex::new($re).expect("Failed to parse regex"))
+    }};
+}
+
 fn main() {
     let mut settings = Config::default();
     let args = Cli::parse();
@@ -152,9 +160,7 @@ fn check_apps_and_kill(
 }
 fn check_args(user_args: &str, args: &str) -> bool {
     if user_args.contains("*") {
-        Regex::new(&user_args.replace("*", ".+"))
-            .expect("Failed to parse `*` to `.+` regex")
-            .is_match(args)
+        lazy_regex!(&user_args.replace("*", ".*")).is_match(args)
     } else {
         user_args == args
     }

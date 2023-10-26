@@ -84,6 +84,7 @@ dependencies = [
  "chrono",
  "clap",
  "config",
+ "once_cell",
  "psutil",
  "regex",
  "serde 1.0.117",
