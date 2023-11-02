@@ -21,7 +21,7 @@ pub trait RuleManager: Clone + Send + Sync {
     async fn disable_rule(&self, rule_id: RuleID) -> Result<()>;
     async fn enable_rule(&self, rule_id: RuleID) -> Result<()>;
 
-    async fn get_rules(&self) -> Result<Vec<RuleWithID>>;
+    async fn get_rules(&self) -> Result<Vec<Rule>>;
 
     async fn stop(&self) -> Result<()>;
 }
@@ -53,7 +53,7 @@ enum Message {
     EnableRule(RuleID, ReplyChannel<Result<()>>),
     DisableRule(RuleID, ReplyChannel<Result<()>>),
 
-    GetRules(ReplyChannel<Vec<RuleWithID>>),
+    GetRules(ReplyChannel<Vec<Rule>>),
 }
 
 #[derive(Clone)]
@@ -95,7 +95,7 @@ impl RuleManager for RuleManagerImpl {
             .map_err(|e| Error::Internal(format!("MailboxError: {e}")))?
     }
 
-    async fn get_rules(&self) -> Result<Vec<RuleWithID>> {
+    async fn get_rules(&self) -> Result<Vec<Rule>> {
         self.mailbox
             .post_and_reply(|r| Message::GetRules(r))
             .await
@@ -207,7 +207,7 @@ async fn mailbox_step(
                 .rules
                 .clone()
                 .into_iter()
-                .map(|(id, rule)| RuleWithID { id, rule })
+                .map(|(_id, rule)| rule)
                 .collect::<Vec<_>>();
             reply.reply(rules);
         }

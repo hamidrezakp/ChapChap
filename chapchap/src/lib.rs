@@ -13,17 +13,17 @@ pub async fn service() -> anyhow::Result<()> {
     trace!("Setting up services");
 
     let (rule_manager, mut rule_manager_notification) = rule_manager::start()?;
-    let ebpf_manager = ebpf_manager::start()?;
+    //let ebpf_manager = ebpf_manager::start()?;
     let ipc_manager = ipc_manager::start(rule_manager.clone()).await?;
 
-    trace!("All services are up");
+    //trace!("All services are up");
 
-    ebpf_manager
-        .program_monitor_load()
-        .await
-        .context("Load program monitor")?;
+    //ebpf_manager
+    //    .program_monitor_load()
+    //    .await
+    //    .context("Load program monitor")?;
 
-    trace!("porgram monitor loaded");
+    //trace!("porgram monitor loaded");
 
     loop {
         tokio::select! {
@@ -32,7 +32,7 @@ pub async fn service() -> anyhow::Result<()> {
                     Ok(_) => {
                         println!("got ctrl_c, stopping now ...");
                         ipc_manager.stop().await?; //TODO: aggregate errors rather than short-circuiting
-                        ebpf_manager.stop().await?;
+                        //ebpf_manager.stop().await?;
                         rule_manager.stop().await?;
                         break Ok(());
                     }
@@ -42,46 +42,46 @@ pub async fn service() -> anyhow::Result<()> {
             Some(notification) = rule_manager_notification.recv() => {
                 match notification {
                     rule_manager::Notification::RuleAdded{rule, ..} => {
-                        ipc_manager.rules_changed().await?;
+                        ipc_manager.emit_rules_changed().await?;
 
                         if !rule.is_active {
                             continue;
                         }
 
-                        match rule.module {
-                            chapchap_common::rule_manager::Module::ProgramMonitor(module_rule) =>
-                                add_program_monitor_rule(&ebpf_manager, module_rule).await,
-                        }
+                        //match rule.module {
+                        //    chapchap_common::rule_manager::Module::ProgramMonitor(module_rule) =>
+                        //        add_program_monitor_rule(&ebpf_manager, module_rule).await,
+                        //}
                     },
 
                     rule_manager::Notification::RuleRemoved{rule, ..} =>
                     {
-                        ipc_manager.rules_changed().await?;
+                        ipc_manager.emit_rules_changed().await?;
 
                         if !rule.is_active {
                             continue;
                         }
 
-                        match rule.module {
-                            chapchap_common::rule_manager::Module::ProgramMonitor(module_rule) =>
-                                remove_program_monitor_rule(&ebpf_manager, module_rule).await,
-                        }
+                        //match rule.module {
+                        //    chapchap_common::rule_manager::Module::ProgramMonitor(module_rule) =>
+                        //        remove_program_monitor_rule(&ebpf_manager, module_rule).await,
+                        //}
                     },
 
                     rule_manager::Notification::RuleUpdated{old_rule, new_rule, ..} => {
-                        ipc_manager.rules_changed().await?;
+                        ipc_manager.emit_rules_changed().await?;
 
-                        if !old_rule.is_active && new_rule.is_active {
-                            match new_rule.module {
-                                chapchap_common::rule_manager::Module::ProgramMonitor(module_rule) =>
-                                    add_program_monitor_rule(&ebpf_manager, module_rule).await,
-                            }
-                        } else if old_rule.is_active && !new_rule.is_active {
-                            match new_rule.module {
-                                chapchap_common::rule_manager::Module::ProgramMonitor(module_rule) =>
-                                    remove_program_monitor_rule(&ebpf_manager, module_rule).await,
-                            }
-                        }
+                        //if !old_rule.is_active && new_rule.is_active {
+                        //    match new_rule.module {
+                        //        chapchap_common::rule_manager::Module::ProgramMonitor(module_rule) =>
+                        //            add_program_monitor_rule(&ebpf_manager, module_rule).await,
+                        //    }
+                        //} else if old_rule.is_active && !new_rule.is_active {
+                        //    match new_rule.module {
+                        //        chapchap_common::rule_manager::Module::ProgramMonitor(module_rule) =>
+                        //            remove_program_monitor_rule(&ebpf_manager, module_rule).await,
+                        //    }
+                        //}
                     }
                 }
             }

@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use zbus::zvariant::Error as VariantError;
 use zbus::zvariant::{Array, OwnedValue, Type, Value};
 
-use super::Error;
 use crate::rule_manager::program_monitor as program_monitor_types;
 
 mod value_convert;
@@ -24,7 +24,7 @@ impl From<program_monitor_types::Rule> for Rule {
 }
 
 impl TryFrom<Rule> for program_monitor_types::Rule {
-    type Error = Error;
+    type Error = zbus::Error;
 
     fn try_from(value: Rule) -> Result<Self, Self::Error> {
         let filter = value.filter.try_into()?;
@@ -50,7 +50,7 @@ impl From<program_monitor_types::TimeSlice> for TimeSlice {
 }
 
 impl TryFrom<TimeSlice> for program_monitor_types::TimeSlice {
-    type Error = Error;
+    type Error = zbus::Error;
 
     fn try_from(value: TimeSlice) -> Result<Self, Self::Error> {
         let start = value.start.try_into()?;
@@ -91,7 +91,7 @@ impl From<program_monitor_types::Filter> for Filter {
 }
 
 impl TryFrom<Filter> for program_monitor_types::Filter {
-    type Error = Error;
+    type Error = zbus::Error;
 
     fn try_from(value: Filter) -> Result<Self, Self::Error> {
         match value {
@@ -99,7 +99,7 @@ impl TryFrom<Filter> for program_monitor_types::Filter {
             Filter::Scheduled(i) => {
                 let items = Array::try_from(i.to_owned())
                     .and_then(TryInto::<Vec<TimeSlice>>::try_into)
-                    .map_err(|e| Error::InvalidZVariant(format!("Expected TimeSlice: {e}")))?
+                    .map_err(|_| VariantError::IncorrectType)?
                     .into_iter()
                     .map(TryInto::<program_monitor_types::TimeSlice>::try_into)
                     .collect::<Result<_, _>>()?;
@@ -108,23 +108,19 @@ impl TryFrom<Filter> for program_monitor_types::Filter {
             Filter::TimeLimited(i) => {
                 let array: Array = i
                     .try_into()
-                    .map_err(|e| Error::InvalidZVariant(format!("invalid Array: {e}")))?;
+                    .map_err(|_| zbus::Error::Variant(VariantError::IncorrectType))?;
                 let value: Vec<u64> = array
                     .try_into()
-                    .map_err(|e| Error::InvalidZVariant(format!("invalid Array: {e}")))?;
+                    .map_err(|_| zbus::Error::Variant(VariantError::IncorrectType))?;
 
                 if value.len() != 2 {
-                    return Err(Error::InvalidZVariant(
-                        "invalid duration, expected 2 fields".into(),
-                    ));
+                    return Err(zbus::Error::Variant(VariantError::IncorrectType));
                 }
 
                 let secs = value[0];
 
                 if value[1] > (u32::MAX as u64) {
-                    return Err(Error::InvalidZVariant(
-                        "invalid duration, expected subsecond nanos".into(),
-                    ));
+                    return Err(zbus::Error::Variant(VariantError::IncorrectType));
                 }
                 let nanos = value[1] as u32;
 
@@ -170,10 +166,10 @@ impl From<chrono::NaiveTime> for NaiveTime {
 }
 
 impl TryFrom<NaiveTime> for chrono::NaiveTime {
-    type Error = Error;
+    type Error = zbus::Error;
 
     fn try_from(value: NaiveTime) -> Result<Self, Self::Error> {
         chrono::NaiveTime::from_str(&value.0)
-            .map_err(|e| Error::InvalidZVariant(format!("NaiveTime: {e}")))
+            .map_err(|_| zbus::Error::Variant(VariantError::IncorrectType))
     }
 }

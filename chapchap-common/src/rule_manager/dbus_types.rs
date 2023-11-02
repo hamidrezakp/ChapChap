@@ -3,8 +3,6 @@ use zbus::zvariant::{Type, Value};
 
 pub use super::RuleID;
 
-use super::Error;
-
 mod program_monitor;
 
 mod value_convert;
@@ -27,7 +25,7 @@ impl From<super::Rule> for Rule {
 }
 
 impl TryFrom<Rule> for super::Rule {
-    type Error = Error;
+    type Error = zbus::Error;
 
     fn try_from(value: Rule) -> std::result::Result<Self, Self::Error> {
         Ok(Self {
@@ -54,7 +52,7 @@ impl<'a> From<super::RuleWithID> for RuleWithID {
 }
 
 impl<'a> TryFrom<RuleWithID> for super::RuleWithID {
-    type Error = Error;
+    type Error = zbus::Error;
 
     fn try_from(value: RuleWithID) -> std::result::Result<Self, Self::Error> {
         Ok(Self {
@@ -78,7 +76,7 @@ impl From<super::Module> for Module {
 }
 
 impl TryFrom<Module> for super::Module {
-    type Error = Error;
+    type Error = zbus::Error;
 
     fn try_from(value: Module) -> std::result::Result<Self, Self::Error> {
         Ok(match value {

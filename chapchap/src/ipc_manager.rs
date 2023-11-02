@@ -1,6 +1,6 @@
 use anyhow::Context;
 use async_trait::async_trait;
-use chapchap_common::rule_manager::{dbus_types, Error as RuleError, Rule, RuleID, RuleWithID};
+use chapchap_common::rule_manager::{dbus_types, Rule, RuleID, RuleWithID};
 use dyn_clonable::clonable;
 use log::trace;
 use mailbox_processor::{callback::CallbackMailboxProcessor, ReplyChannel};
@@ -16,7 +16,7 @@ mod types;
 #[async_trait]
 #[clonable]
 pub trait IPCManager: Clone + Send + Sync {
-    async fn rules_changed(&self) -> Result<(), Error>;
+    async fn emit_rules_changed(&self) -> Result<(), Error>;
 
     async fn stop(&self) -> Result<(), Error>;
 }
@@ -31,7 +31,7 @@ enum Message {
     DisableRule(RuleID, ReplyChannel<Result<(), Error>>),
     EnableRule(RuleID, ReplyChannel<Result<(), Error>>),
 
-    GetRules(ReplyChannel<Result<Vec<RuleWithID>, Error>>),
+    GetRules(ReplyChannel<Result<Vec<Rule>, Error>>),
 }
 
 #[derive(Clone)]
@@ -44,7 +44,7 @@ pub struct IPCManagerImpl {
 
 #[async_trait]
 impl IPCManager for IPCManagerImpl {
-    async fn rules_changed(&self) -> Result<(), Error> {
+    async fn emit_rules_changed(&self) -> Result<(), Error> {
         if let Some(signal_context) = self.signal_context.get() {
             self.rules_changed(&signal_context)
                 .await
@@ -110,7 +110,7 @@ async fn mailbox_step(_mb: CallbackMailboxProcessor<Message>, msg: Message, stat
 #[dbus_interface(name = "ir.hrkp.Chapchap1.RuleManager")]
 impl IPCManagerImpl {
     /// Add new rule
-    async fn add_rule(&self, rule: dbus_types::Rule) -> Result<RuleID, RuleError> {
+    async fn add_rule(&self, rule: dbus_types::Rule) -> zbus::fdo::Result<RuleID> {
         let rule: Rule = rule.try_into()?;
 
         trace!("Add rule: {rule:?}");
@@ -119,45 +119,47 @@ impl IPCManagerImpl {
             .mailbox
             .post_and_reply(|r| Message::AddRule(rule, r))
             .await
-            .map_err(|e| RuleError::InternalServer(e.to_string()))?
-            .map_err(|e| RuleError::RuleManager(e.to_string()));
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()));
 
         result
     }
 
     /// Disable rule
-    async fn disable_rule(&self, rule_id: dbus_types::RuleID) -> Result<(), RuleError> {
+    async fn disable_rule(&self, rule_id: dbus_types::RuleID) -> zbus::fdo::Result<()> {
         trace!("Disable rule: {rule_id}");
 
         self.mailbox
             .post_and_reply(|r| Message::DisableRule(rule_id, r))
             .await
-            .map_err(|e| RuleError::InternalServer(e.to_string()))?
-            .map_err(|e| RuleError::RuleManager(e.to_string()))
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
     /// Enable rule
-    async fn enable_rule(&self, rule_id: dbus_types::RuleID) -> Result<(), RuleError> {
+    async fn enable_rule(&self, rule_id: dbus_types::RuleID) -> zbus::fdo::Result<()> {
         trace!("Enable rule: {rule_id}");
 
         self.mailbox
             .post_and_reply(|r| Message::EnableRule(rule_id, r))
             .await
-            .map_err(|e| RuleError::InternalServer(e.to_string()))?
-            .map_err(|e| RuleError::RuleManager(e.to_string()))
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
     #[dbus_interface(property)]
-    async fn rules(&self) -> zbus::fdo::Result<Vec<dbus_types::RuleWithID>> {
+    async fn rules(&self) -> zbus::fdo::Result<Vec<dbus_types::Rule>> {
         trace!("Getting all the rule");
 
         let rules = self
             .mailbox
             .post_and_reply(|r| Message::GetRules(r))
             .await
-            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
-            .map(|v| v.into_iter().map(Into::into).collect::<Vec<_>>())?;
+            .unwrap()
+            .map(|v| v.into_iter().map(Into::into).collect::<Vec<_>>())
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+            .unwrap();
 
         trace!("Rules: {rules:?}");
         Ok(rules)
@@ -173,7 +175,7 @@ pub async fn start(rule_manager: Box<dyn RuleManager>) -> anyhow::Result<Box<dyn
         signal_context: OnceCell::new(),
     };
 
-    let serving_path = "/ir/hrkp/Chapchap1".to_string();
+    let serving_path = "/ir/hrkp/Chapchap1/RuleManager".to_string();
 
     let dbus_connection = ConnectionBuilder::session()?
         .name("ir.hrkp.Chapchap")?

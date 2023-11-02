@@ -25,15 +25,3 @@ pub struct RuleWithID {
 pub enum Module {
     ProgramMonitor(program_monitor::Rule),
 }
-
-#[derive(Debug, DBusError)]
-#[dbus_error(prefix = "ir.hrkp.Chapchap")]
-pub enum Error {
-    InvalidZVariant(String),
-    RuleManager(String),
-
-    #[dbus_error(zbus_error)]
-    ZBus(zbus::Error),
-
-    InternalServer(String),
-}
