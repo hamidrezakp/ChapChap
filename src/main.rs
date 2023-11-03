@@ -1,9 +1,12 @@
 use chrono::NaiveTime;
+use clap::Parser;
 use config::{Config, File as ConfigFile, FileFormat};
 use psutil::process::ProcessCollector;
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::{env, process::Command, thread, time::Duration};
+use std::{env, thread, time::Duration};
+use once_cell::sync::OnceCell;
 
 /// Represent an app in config file
 #[derive(Debug, Deserialize)]
@@ -13,6 +16,7 @@ struct App {
     slices: Vec<(NaiveTime, NaiveTime)>,
     black_list: bool,
     command: String,
+    args: String,
 }
 
 /// Represent an raw_time app in config file
@@ -23,11 +27,36 @@ struct RawTimeApp {
     slices: Vec<(String, String)>,
     black_list: bool,
     command: String,
+    args: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TempApps {
     apps: Vec<RawTimeApp>,
+}
+
+#[derive(Parser)]
+#[command(name = "Chap Chap", author = "", disable_version_flag=true, about = "simple usage control app", long_about = None, override_usage="chapchap [OPTIONS]")]
+
+struct Cli {
+    #[arg(
+        short,
+        long,
+        value_name = "FILE",
+        default_value = "./config.toml",
+        default_missing_value = "./config.toml",
+        help = "configuration file"
+    )]
+    config: String,
+    #[arg(
+        short,
+        long,
+        value_name = "NUMBER",
+        default_value = "500",
+        default_missing_value = "500",
+        help = "delay betwean checking for processes in ms"
+    )]
+    delay: u64,
 }
 
 impl TempApps {
@@ -57,13 +86,22 @@ impl TempApps {
                     .collect(),
                 black_list: app.black_list,
                 command: app.command.to_owned(),
+                args: app.args.clone().unwrap_or("".to_string()),
             })
             .collect())
     }
 }
 
+macro_rules! lazy_regex {
+    ($re:expr) => {{
+        static RE: OnceCell<Regex> = OnceCell::new();
+        RE.get_or_init(|| Regex::new($re).expect("Failed to parse regex"))
+    }};
+}
+
 fn main() {
     let mut settings = Config::default();
+    let args = Cli::parse();
     if let Ok(config_file_path) = env::var("XDG_CONFIG_HOME") {
         settings
             .merge(ConfigFile::new(
@@ -77,8 +115,8 @@ fn main() {
     // Fallback to search config file in CWD
     } else {
         settings
-            .merge(ConfigFile::new("config.toml", FileFormat::Toml))
-            .expect("Can't open config file in current working directory");
+            .merge(ConfigFile::new(&args.config, FileFormat::Toml))
+            .expect(&format!("Can't open config file in {}", args.config));
     }
 
     let apps = settings
@@ -93,8 +131,7 @@ fn main() {
         process_list.update().expect("Can't update process list");
         check_apps_and_kill(&apps, &process_list.processes);
 
-        // going for a short nap (500ms)
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(args.delay));
     }
 }
 
@@ -102,27 +139,30 @@ fn check_apps_and_kill(
     apps: &Vec<App>,
     process_list: &BTreeMap<psutil::Pid, psutil::process::Process>,
 ) {
-    let pname_pid: Vec<_> = process_list
-        .iter()
-        .map(|x| (x.0, x.1.name().unwrap_or("".into())))
-        .collect();
-
     let now = chrono::Local::now().time();
+    for process in process_list {
+        let process = process.1;
 
-    for app in apps {
-        if let Some(process) = pname_pid.iter().find(|&p| p.1 == app.command) {
-            if app.enabled && kill_or_not(&app, &now) {
-                println!("killing {}", app.name);
-                Command::new("kill")
-                    .args(&["-9", &process.0.to_string()])
-                    .output()
-                    .expect(&format!(
-                        "failed to kill process {}, with PID {}",
-                        &(app.command),
-                        process.0,
-                    ));
+        if let Ok(Some(cmd)) = process.cmdline() {
+            let cmd = cmd.split(" ").collect::<Vec<&str>>();
+            for app in apps {
+                if app.command == cmd[0] {
+                    if (app.args.is_empty() || check_args(&app.args, &cmd[1..].join(" ")))
+                        && (app.enabled && kill_or_not(&app, &now))
+                    {
+                        println!("killing {}", app.name);
+                        process.kill().expect("Failed to kill process");
+                    }
+                }
             }
         }
+    }
+}
+fn check_args(user_args: &str, args: &str) -> bool {
+    if user_args.contains("*") {
+        lazy_regex!(&user_args.replace("*", ".*")).is_match(args)
+    } else {
+        user_args == args
     }
 }
 
