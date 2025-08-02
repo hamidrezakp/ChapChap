@@ -1,12 +1,27 @@
 use chrono::NaiveTime;
 use clap::Parser;
 use config::{Config, File as ConfigFile, FileFormat};
+use once_cell::sync::OnceCell;
 use psutil::process::ProcessCollector;
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::{env, thread, time::Duration};
-use once_cell::sync::OnceCell;
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+enum AppString {
+    Plain(String),
+    Regex(String),
+}
+
+impl AppString {
+    fn is_empty(&self) -> bool {
+        match self {
+            AppString::Plain(s) => s.is_empty(),
+            AppString::Regex(s) => s.is_empty(),
+        }
+    }
+}
 
 /// Represent an app in config file
 #[derive(Debug, Deserialize)]
@@ -15,8 +30,8 @@ struct App {
     enabled: bool,
     slices: Vec<(NaiveTime, NaiveTime)>,
     black_list: bool,
-    command: String,
-    args: String,
+    command: AppString,
+    args: AppString,
 }
 
 /// Represent an raw_time app in config file
@@ -85,17 +100,34 @@ impl TempApps {
                     })
                     .collect(),
                 black_list: app.black_list,
-                command: app.command.to_owned(),
-                args: app.args.clone().unwrap_or("".to_string()),
+                command: if app.command.contains("*") {
+                    AppString::Regex(app.command.replace("*", ".*"))
+                } else {
+                    AppString::Plain(app.command.to_owned())
+                },
+                args: match &app.args {
+                    Some(arg) => {
+                        if arg.contains("*") {
+                            AppString::Regex(arg.replace("*", ".*"))
+                        } else {
+                            AppString::Plain(arg.to_owned())
+                        }
+                    }
+                    None => AppString::Plain("".to_string()),
+                },
             })
             .collect())
     }
 }
 
-macro_rules! lazy_regex {
+static RE: OnceCell<HashMap<String, Regex>> = OnceCell::new();
+
+macro_rules! get_regex {
     ($re:expr) => {{
-        static RE: OnceCell<Regex> = OnceCell::new();
-        RE.get_or_init(|| Regex::new($re).expect("Failed to parse regex"))
+        RE.get()
+            .expect("Regex map not initialized")
+            .get($re)
+            .expect("Failed to retrieve regex from map")
     }};
 }
 
@@ -125,6 +157,26 @@ fn main() {
         .into_app_array()
         .unwrap();
 
+    RE.set(
+        apps.iter()
+            .map(|app| match (app.command.clone(), app.args.clone()) {
+                (AppString::Regex(cmd), AppString::Regex(args)) => [Some(cmd), Some(args)],
+                (AppString::Regex(cmd), AppString::Plain(_)) => [Some(cmd), None],
+                (AppString::Plain(_), AppString::Regex(args)) => [None, Some(args)],
+                _ => [None, None],
+            })
+            .flatten()
+            .flatten()
+            .map(|app_str| {
+                (
+                    app_str.to_owned(),
+                    Regex::new(&app_str).expect("Failed to parse regex"),
+                )
+            })
+            .collect(),
+    )
+    .expect("Failed to create regexes map");
+
     let mut process_list = ProcessCollector::new().unwrap();
 
     loop {
@@ -146,8 +198,8 @@ fn check_apps_and_kill(
         if let Ok(Some(cmd)) = process.cmdline() {
             let cmd = cmd.split(" ").collect::<Vec<&str>>();
             for app in apps {
-                if app.command == cmd[0] {
-                    if (app.args.is_empty() || check_args(&app.args, &cmd[1..].join(" ")))
+                if check_eq(&app.command, cmd[0]) {
+                    if (app.args.is_empty() || check_eq(&app.args, &cmd[1..].join(" ")))
                         && (app.enabled && kill_or_not(&app, &now))
                     {
                         println!("killing {}", app.name);
@@ -158,11 +210,11 @@ fn check_apps_and_kill(
         }
     }
 }
-fn check_args(user_args: &str, args: &str) -> bool {
-    if user_args.contains("*") {
-        lazy_regex!(&user_args.replace("*", ".*")).is_match(args)
-    } else {
-        user_args == args
+
+fn check_eq(app_str: &AppString, proc_str: &str) -> bool {
+    match app_str {
+        AppString::Regex(app_str) => get_regex!(app_str).is_match(proc_str),
+        AppString::Plain(app_str) => app_str == proc_str,
     }
 }
 
