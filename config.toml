@@ -3,13 +3,12 @@ name = "Telegram"
 enabled = true
 slices = [ [18:00:00, 19:00:00] ]
 black_list = false
-command = "telegram-desktop"
-args=""
+command.regex = "Telegram.*"
 
 [[apps]]
 name = "MPV"
 enabled = true
 slices = [ [20:00:00, 23:59:00] ]
 black_list = false
-command = "mpv"
-args = "*vid*"
+command.plain = "mpv"
+args.regex = ".*vid.*"

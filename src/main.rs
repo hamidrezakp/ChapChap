@@ -1,12 +1,25 @@
-use chrono::NaiveTime;
-use clap::Parser;
-use config::{Config, File as ConfigFile, FileFormat};
-use psutil::process::ProcessCollector;
-use regex::Regex;
-use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::{env, thread, time::Duration};
-use once_cell::sync::OnceCell;
+
+use chrono::NaiveTime;
+use clap::Parser;
+use psutil::process::ProcessCollector;
+use regex::Regex;
+use serde::{Deserialize, Deserializer};
+
+#[derive(Deserialize)]
+struct Config {
+    apps: Vec<App>,
+    #[serde(default = "default_delay")]
+    delay_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AppString {
+    Plain(String),
+    Regex(#[serde(deserialize_with = "deserialize_regex")] Regex),
+}
 
 /// Represent an app in config file
 #[derive(Debug, Deserialize)]
@@ -15,29 +28,19 @@ struct App {
     enabled: bool,
     slices: Vec<(NaiveTime, NaiveTime)>,
     black_list: bool,
-    command: String,
-    args: String,
-}
-
-/// Represent an raw_time app in config file
-#[derive(Debug, Deserialize)]
-struct RawTimeApp {
-    name: String,
-    enabled: bool,
-    slices: Vec<(String, String)>,
-    black_list: bool,
-    command: String,
-    args: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TempApps {
-    apps: Vec<RawTimeApp>,
+    command: AppString,
+    args: Option<AppString>,
 }
 
 #[derive(Parser)]
-#[command(name = "Chap Chap", author = "", disable_version_flag=true, about = "simple usage control app", long_about = None, override_usage="chapchap [OPTIONS]")]
-
+#[command(
+    name = "Chap Chap",
+    author = "",
+    disable_version_flag=true,
+    about = "Kill distracting apps",
+    long_about = None,
+    override_usage="chapchap [OPTIONS]")
+]
 struct Cli {
     #[arg(
         short,
@@ -48,90 +51,43 @@ struct Cli {
         help = "configuration file"
     )]
     config: String,
-    #[arg(
-        short,
-        long,
-        value_name = "NUMBER",
-        default_value = "500",
-        default_missing_value = "500",
-        help = "delay betwean checking for processes in ms"
-    )]
-    delay: u64,
 }
 
-impl TempApps {
-    pub fn into_app_array(self: Self) -> Result<Vec<App>, &'static str> {
-        let parse_time = |time_str, app_name| {
-            NaiveTime::parse_from_str(time_str, "%H:%M:%S").expect(&format!(
-                "Syntax error, can't parse time: '{}' in app '{}'",
-                time_str, app_name
-            ))
-        };
-
-        Ok(self
-            .apps
-            .iter()
-            .map(|app| App {
-                name: app.name.to_owned(),
-                enabled: app.enabled,
-                slices: app
-                    .slices
-                    .iter()
-                    .map(|slice| {
-                        (
-                            parse_time(&slice.0, &app.name),
-                            parse_time(&slice.1, &app.name),
-                        )
-                    })
-                    .collect(),
-                black_list: app.black_list,
-                command: app.command.to_owned(),
-                args: app.args.clone().unwrap_or("".to_string()),
-            })
-            .collect())
-    }
-}
-
-macro_rules! lazy_regex {
-    ($re:expr) => {{
-        static RE: OnceCell<Regex> = OnceCell::new();
-        RE.get_or_init(|| Regex::new($re).expect("Failed to parse regex"))
-    }};
-}
-
-fn main() {
-    let mut settings = Config::default();
+fn main() -> Result<(), String> {
+    let mut config = config::Config::default();
     let args = Cli::parse();
     if let Ok(config_file_path) = env::var("XDG_CONFIG_HOME") {
-        settings
-            .merge(ConfigFile::new(
-                &format!("{}/chapchap/config.toml", config_file_path),
-                FileFormat::Toml,
+        config
+            .merge(config::File::new(
+                &format!("{config_file_path}/chapchap/config.toml",),
+                config::FileFormat::Toml,
             ))
-            .expect(&format!(
-                "Can't open config file in {}/chapchap/config.toml",
-                config_file_path
-            ));
+            .map_err(|e| {
+                format!("Can't open config file in {config_file_path}/chapchap/config.toml: {e:?}",)
+            })?;
     // Fallback to search config file in CWD
     } else {
-        settings
-            .merge(ConfigFile::new(&args.config, FileFormat::Toml))
-            .expect(&format!("Can't open config file in {}", args.config));
+        config
+            .merge(config::File::new(&args.config, config::FileFormat::Toml))
+            .map_err(|e| format!("Can't open config file in {}: {e:?}", args.config))?;
     }
 
-    let apps = settings
-        .try_into::<TempApps>()
-        .expect("Can't parse Config file")
-        .into_app_array()
-        .unwrap();
+    let config = config
+        .try_into::<Config>()
+        .map_err(|e| format!("Can't parse configuration: {e:?}"))?;
+    let apps = config.apps;
+    let delay = Duration::from_millis(config.delay_ms);
 
-    let mut process_list = ProcessCollector::new().unwrap();
+    let mut process_list =
+        ProcessCollector::new().map_err(|e| format!("failed to get process list: {e:?}"))?;
 
     loop {
-        process_list.update().expect("Can't update process list");
-        check_apps_and_kill(&apps, &process_list.processes);
+        if let Err(e) = process_list.update() {
+            eprintln!("Updating process list failed: {e:?}");
+        }
 
-        thread::sleep(Duration::from_millis(args.delay));
+        check_apps_and_kill(&apps, &process_list.processes);
+        thread::sleep(delay);
     }
 }
 
@@ -140,33 +96,39 @@ fn check_apps_and_kill(
     process_list: &BTreeMap<psutil::Pid, psutil::process::Process>,
 ) {
     let now = chrono::Local::now().time();
-    for process in process_list {
-        let process = process.1;
-
+    for (_, process) in process_list {
         if let Ok(Some(cmd)) = process.cmdline() {
             let cmd = cmd.split(" ").collect::<Vec<&str>>();
             for app in apps {
-                if app.command == cmd[0] {
-                    if (app.args.is_empty() || check_args(&app.args, &cmd[1..].join(" ")))
-                        && (app.enabled && kill_or_not(&app, &now))
-                    {
-                        println!("killing {}", app.name);
-                        process.kill().expect("Failed to kill process");
+                if check_eq(&app.command, cmd[0])
+                    && (app.args.is_none()
+                        || app
+                            .args
+                            .as_ref()
+                            .is_some_and(|args| check_eq(&args, &cmd[1..].join(" "))))
+                    && (app.enabled && should_kill(&app, &now))
+                {
+                    println!("killing {}", app.name);
+                    if let Err(e) = process.kill() {
+                        eprintln!("error while trying to kill {}: {e:?}", app.name)
                     }
                 }
             }
         }
     }
 }
-fn check_args(user_args: &str, args: &str) -> bool {
-    if user_args.contains("*") {
-        lazy_regex!(&user_args.replace("*", ".*")).is_match(args)
-    } else {
-        user_args == args
+
+fn check_eq(app_str: &AppString, proc_str: &str) -> bool {
+    if proc_str.starts_with("telegram") {
+        println!("{app_str:?}, {proc_str}");
+    }
+    match app_str {
+        AppString::Regex(re) => re.is_match(proc_str),
+        AppString::Plain(app_str) => app_str == proc_str,
     }
 }
 
-fn kill_or_not(app: &App, now: &NaiveTime) -> bool {
+fn should_kill(app: &App, now: &NaiveTime) -> bool {
     // if white_list is on, then we only allow on the app to be run on these time slices
     // otherwise, we must kill the app.
     app.slices
@@ -174,4 +136,16 @@ fn kill_or_not(app: &App, now: &NaiveTime) -> bool {
         .map(|range| &range.0 <= now && now <= &range.1)
         .any(|x| x)
         ^ (!app.black_list)
+}
+
+fn deserialize_regex<'de, D>(d: D) -> Result<Regex, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(d)?;
+    Regex::new(&s).map_err(|e| serde::de::Error::custom(&format!("invalid regex: {e:?}")))
+}
+
+const fn default_delay() -> u64 {
+    500
 }

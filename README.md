@@ -38,7 +38,7 @@ name = "APPNAME"
 enabled = true
 slices = [ [13:10:00, 12:00:00], [19:00:10, 23:59:00] ] # you can write multiple time slice
 black_list = false # time slices are black list or white list?
-command = "mpv" # the command that application is running from
+command = "dir*/mpv" # the command that application is running from
 args = "*vid*" # the argument of command(supports *) and can be empty
 ```
 Note: `slices` filed consist of an array of time slices like [start,
